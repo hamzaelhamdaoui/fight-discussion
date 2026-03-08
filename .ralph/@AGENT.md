@@ -1,5 +1,10 @@
 # @AGENT — Manual operativo (Ralph + Claude Code) — FightReplay AI
 
+## Command execution policy (do not block)
+- Do NOT block waiting for approval to run commands.
+- Assume the USER will run verification commands: npm install, npm run build, npm run lint, npm run typecheck, npx playwright test.
+- If verification is needed, output the exact commands and continue implementing without pausing.
+
 ## 0) Objetivo del agente
 Entregar una web app MOBILE-FIRST production-ready cumpliendo `.ralph/PROMPT.md` y siguiendo el plan `.ralph/@fix_plan.md`.
 No se acepta “demo bonita” sin robustez. Todo debe ser verificable por comandos.

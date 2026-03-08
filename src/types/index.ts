@@ -9,7 +9,7 @@ export const MessageSchema = z.object({
   id: z.string(),
   speaker: SpeakerSchema,
   text: z.string(),
-  timestamp: z.string().optional(),
+  timestamp: z.string().nullish(), // Can be string, null, or undefined
   confidence: z.number().min(0).max(1),
   sourceImageId: z.string().optional(),
 });
@@ -18,7 +18,7 @@ export type Message = z.infer<typeof MessageSchema>;
 export const ExtractedMessageSchema = z.object({
   speaker: SpeakerSchema,
   text: z.string(),
-  timestamp: z.string().optional(),
+  timestamp: z.string().nullish(), // Can be string, null, or undefined
   confidence: z.number().min(0).max(1),
   position_in_image: z.number().optional(),
 });

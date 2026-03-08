@@ -1,280 +1,398 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowLeft,
   AlertTriangle,
-  CheckCircle2,
   Loader2,
   MessageSquare,
   Swords,
+  ChevronLeft,
+  Settings,
+  Edit3,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useWizardStore } from "@/stores/wizard-store";
-import { AdSlot } from "@/components/ads/ad-slot";
-import { cn, getInitials, formatTimestamp } from "@/lib/utils";
-import type { Message, ReconstructedTimeline } from "@/types";
-
-// Mock data for demo purposes
-const mockTimeline: ReconstructedTimeline = {
-  messages: [
-    {
-      id: "1",
-      speaker: "A",
-      text: "I can't believe you forgot our anniversary again!",
-      confidence: 0.95,
-      timestamp: "2024-01-15T18:30:00",
-    },
-    {
-      id: "2",
-      speaker: "B",
-      text: "I didn't forget! I was planning a surprise!",
-      confidence: 0.92,
-      timestamp: "2024-01-15T18:31:00",
-    },
-    {
-      id: "3",
-      speaker: "A",
-      text: "That's what you always say. Just admit you forgot.",
-      confidence: 0.88,
-      timestamp: "2024-01-15T18:32:00",
-    },
-    {
-      id: "4",
-      speaker: "B",
-      text: "I have the restaurant reservation confirmation right here!",
-      confidence: 0.94,
-      timestamp: "2024-01-15T18:33:00",
-    },
-    {
-      id: "5",
-      speaker: "A",
-      text: "Oh... well you could have told me earlier instead of letting me worry",
-      confidence: 0.91,
-      timestamp: "2024-01-15T18:35:00",
-    },
-    {
-      id: "6",
-      speaker: "B",
-      text: "That's why it's called a SURPRISE. I was going to tell you tonight!",
-      confidence: 0.89,
-      timestamp: "2024-01-15T18:36:00",
-    },
-    {
-      id: "7",
-      speaker: "A",
-      text: "Fine. But next time at least give me a hint so I don't panic all day",
-      confidence: 0.93,
-      timestamp: "2024-01-15T18:38:00",
-    },
-    {
-      id: "8",
-      speaker: "B",
-      text: "Deal. Now go get ready, reservation is at 8!",
-      confidence: 0.96,
-      timestamp: "2024-01-15T18:39:00",
-    },
-  ],
-  overallConfidence: 0.91,
-  explanationShort:
-    "Conversation reconstructed with high confidence. Timeline order determined by message context and flow.",
-  gaps: [],
-  language: "en",
-};
+import { useTranslations, t as translate } from "@/hooks/use-translations";
+import { battleApi } from "@/services/api/battle-api";
+import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import type { Message } from "@/types";
 
 export function ReviewStep() {
-  const { participants, nextStep, prevStep, setTimeline, timeline, images } =
+  const { participants, nextStep, prevStep, setTimeline, timeline, images, setIsProcessing } =
     useWizardStore();
+  const t = useTranslations();
 
   const [isAnalyzing, setIsAnalyzing] = useState(!timeline);
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  // Simulate analysis process
-  useEffect(() => {
-    if (timeline) {
+  // Reconstruct timeline using API
+  const reconstructTimeline = useCallback(async () => {
+    const extractions = images
+      .filter((img) => img.extractionResult)
+      .map((img) => img.extractionResult!);
+
+    if (extractions.length === 0) {
+      setError(t.errors.noImagesAnalyzed);
       setIsAnalyzing(false);
-      setProgress(100);
       return;
     }
 
-    const steps = [
-      { progress: 20, delay: 500 },
-      { progress: 40, delay: 1000 },
-      { progress: 60, delay: 1500 },
-      { progress: 80, delay: 2000 },
-      { progress: 100, delay: 2500 },
-    ];
+    setIsAnalyzing(true);
+    setIsProcessing(true);
+    setProgress(0);
+    setError(null);
 
-    const timers: NodeJS.Timeout[] = [];
+    // Simulate progress while waiting for API
+    const progressInterval = setInterval(() => {
+      setProgress((prev) => Math.min(prev + 10, 90));
+    }, 300);
 
-    steps.forEach(({ progress, delay }) => {
-      const timer = setTimeout(() => {
-        setProgress(progress);
-        if (progress === 100) {
-          setTimeout(() => {
-            setTimeline(mockTimeline);
-            setIsAnalyzing(false);
-          }, 300);
-        }
-      }, delay);
-      timers.push(timer);
-    });
+    try {
+      const reconstructedTimeline = await battleApi.reconstructTimeline({ extractions });
+      clearInterval(progressInterval);
+      setProgress(100);
+      setTimeline(reconstructedTimeline);
+      setIsAnalyzing(false);
+    } catch (err) {
+      clearInterval(progressInterval);
+      const errorMessage = (err as Error).message;
+      setError(errorMessage);
+      setIsAnalyzing(false);
+      toast({
+        title: t.review.reconstructionFailed,
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [images, setTimeline, setIsProcessing, t]);
 
-    return () => timers.forEach(clearTimeout);
-  }, [timeline, setTimeline]);
+  // Call reconstruct on mount if no timeline exists
+  useEffect(() => {
+    if (!timeline && !error) {
+      reconstructTimeline();
+    } else if (timeline) {
+      setIsAnalyzing(false);
+      setProgress(100);
+    }
+  }, [timeline, error, reconstructTimeline]);
 
-  const displayTimeline = timeline || mockTimeline;
-  const confidencePercent = Math.round(displayTimeline.overallConfidence * 100);
+  const handleRetry = () => {
+    setError(null);
+    reconstructTimeline();
+  };
+
+  // Fallback for display if no timeline yet
+  const displayTimeline = timeline;
+  const confidencePercent = displayTimeline
+    ? Math.round(displayTimeline.overallConfidence * 100)
+    : 0;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold">Review Conversation</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          AI has reconstructed the timeline. Verify it looks correct.
-        </p>
-      </div>
+    <div className="min-h-screen bg-cinder">
+      {/* Main Container - Figma exact design */}
+      <div className="relative max-w-[375px] mx-auto bg-cinder border-x border-white/5 shadow-2xl overflow-hidden">
 
-      {/* Analysis Progress */}
-      <AnimatePresence mode="wait">
-        {isAnalyzing ? (
-          <motion.div
-            key="analyzing"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="space-y-4"
+        {/* Header - matches Figma exactly */}
+        <div className="flex items-center justify-between px-4 py-6">
+          <button
+            onClick={prevStep}
+            disabled={isAnalyzing}
+            className="w-10 h-10 rounded-lg bg-white/5 border border-white/5 flex items-center justify-center"
           >
-            <Card>
-              <CardContent className="py-8 text-center">
-                <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
-                <h3 className="mt-4 font-semibold">Analyzing Screenshots</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Processing {images.length} image{images.length !== 1 && "s"}...
-                </p>
-                <div className="mx-auto mt-4 max-w-xs">
-                  <Progress value={progress} className="h-2" />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {progress < 30
-                      ? "Extracting text..."
-                      : progress < 60
-                      ? "Identifying speakers..."
-                      : progress < 90
-                      ? "Reconstructing timeline..."
-                      : "Finalizing..."}
+            <ChevronLeft className="w-6 h-6 text-white/80" />
+          </button>
+
+          {/* Progress indicator - matches Figma */}
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-white/20" />
+            <div className="w-2 h-2 rounded-full bg-white/20" />
+            <div
+              className="w-8 h-1.5 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)]"
+              style={{
+                background: "linear-gradient(to right, #22d3ee 0%, white 50%, #f97316 100%)"
+              }}
+            />
+          </div>
+
+          <button className="w-10 h-10 rounded-lg bg-white/5 border border-white/5 flex items-center justify-center">
+            <Settings className="w-5 h-5 text-white/60" />
+          </button>
+        </div>
+
+        {/* Title Section - matches Figma exactly */}
+        <div className="px-6 pb-2">
+          <h1 className="text-2xl font-bold text-white tracking-[-0.6px]">{t.review.title}</h1>
+          <p className="mt-1 text-sm text-white/50">
+            {t.review.subtitle}
+          </p>
+        </div>
+
+        {/* Content States */}
+        <AnimatePresence mode="wait">
+          {error ? (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="px-6 py-6 space-y-4"
+            >
+              {/* Error Card - matches Figma */}
+              <div className="rounded-2xl bg-cinder-light border border-red-500/30 p-6">
+                <div className="flex flex-col items-center text-center">
+                  <AlertTriangle className="h-12 w-12 text-red-500" />
+                  <h3 className="mt-4 font-semibold text-red-500">{t.review.reconstructionFailed}</h3>
+                  <p className="mt-2 text-sm text-white/50 max-w-xs">
+                    {error}
                   </p>
+                  <button
+                    onClick={handleRetry}
+                    className="mt-6 px-6 py-3 rounded-xl bg-blue hover:bg-blue-600 text-white font-semibold transition-colors"
+                  >
+                    {t.review.tryAgain}
+                  </button>
                 </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="results"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-4"
-          >
-            {/* Confidence indicator */}
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {confidencePercent >= 80 ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                    )}
+              </div>
+            </motion.div>
+          ) : isAnalyzing ? (
+            <motion.div
+              key="analyzing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="px-6 py-6 space-y-4"
+            >
+              {/* Loading Card - matches Figma */}
+              <div className="rounded-2xl bg-cinder-light border border-white/10 p-6">
+                <div className="flex flex-col items-center text-center">
+                  <Loader2 className="h-12 w-12 animate-spin text-blue" />
+                  <h3 className="mt-4 font-semibold text-white">{t.review.reconstructing}</h3>
+                  <p className="mt-1 text-sm text-white/50">
+                    {translate(t.review.processingImages, { count: images.length })}
+                  </p>
+                  <div className="w-full max-w-xs mt-6">
+                    <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                      <motion.div
+                        className="h-full rounded-full"
+                        style={{
+                          background: "linear-gradient(to right, #22d3ee 0%, #3b82f6 100%)"
+                        }}
+                        animate={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-white/40">
+                      {progress < 30
+                        ? t.review.progressCombining
+                        : progress < 60
+                        ? t.review.progressOrdering
+                        : progress < 90
+                        ? t.review.progressAnalyzing
+                        : t.review.progressFinalizing}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ) : displayTimeline ? (
+            <motion.div
+              key="results"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-6"
+            >
+              {/* Confidence Card - matches Figma exactly */}
+              <div className="mx-6">
+                <div
+                  className="rounded-2xl p-4 backdrop-blur-[10px] border border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.4)]"
+                  style={{ background: "rgba(20,20,30,0.7)" }}
+                >
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium">
-                        {confidencePercent}% Confidence
+                      <p className="text-[10px] font-bold text-white/40 tracking-[1px] uppercase">
+                        Confianza del Análisis
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        {displayTimeline.explanationShort}
+                      <p className="text-xs text-white/70 mt-1">
+                        Interpretación IA de emociones
                       </p>
+                    </div>
+                    {/* Circular progress - matches Figma */}
+                    <div className="relative w-14 h-14">
+                      <svg className="w-full h-full -rotate-90" viewBox="0 0 56 56">
+                        <circle
+                          cx="28"
+                          cy="28"
+                          r="22"
+                          fill="none"
+                          stroke="rgba(255,255,255,0.1)"
+                          strokeWidth="4"
+                        />
+                        <circle
+                          cx="28"
+                          cy="28"
+                          r="22"
+                          fill="none"
+                          stroke="url(#gradient)"
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          strokeDasharray={`${confidencePercent * 1.38} 138`}
+                        />
+                        <defs>
+                          <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#22d3ee" />
+                            <stop offset="100%" stopColor="#f97316" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-white">
+                        {confidencePercent}%
+                      </span>
                     </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Message timeline */}
-            <Card>
-              <CardContent className="p-0">
-                <div className="flex items-center justify-between border-b p-4">
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">
-                      {displayTimeline.messages.length} Messages
+              {/* Gaps Warning Card - matches Figma exactly */}
+              {displayTimeline.gaps.length > 0 && (
+                <div className="mx-6">
+                  <div className="rounded-xl bg-cinder-light border border-gold/30 p-4">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-gold flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-semibold text-gold tracking-wider uppercase">
+                          {t.review.possibleGaps}
+                        </p>
+                        <p className="mt-1 text-xs text-white/50">
+                          {t.review.gapsDescription}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages Section - matches Figma exactly (Chat-like view) */}
+              <div
+                className="relative mx-4 rounded-t-none overflow-hidden"
+                style={{
+                  maskImage: "linear-gradient(to bottom, black 85%, transparent 100%)"
+                }}
+              >
+                {/* Date badge */}
+                <div className="flex justify-center mb-4 opacity-50">
+                  <div className="px-3 py-1 rounded-full bg-white/5 border border-white/5">
+                    <span className="text-[10px] text-white/60">
+                      Ayer, 10:42 PM
                     </span>
                   </div>
                 </div>
 
-                <ScrollArea className="h-[300px]">
-                  <div className="space-y-3 p-4">
-                    {displayTimeline.messages.map((message, index) => (
-                      <MessageBubble
-                        key={message.id}
-                        message={message}
-                        participantName={participants[message.speaker].name}
-                        index={index}
-                      />
-                    ))}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+                {/* Messages List */}
+                <div className="space-y-4 max-h-[400px] overflow-y-auto px-2 pb-24">
+                  {displayTimeline.messages.map((message, index) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      participantName={participants[message.speaker].name}
+                      index={index}
+                    />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="px-6 py-6 space-y-4"
+            >
+              {/* Empty State Card */}
+              <div className="rounded-2xl bg-cinder-light border border-white/10 p-6">
+                <div className="flex flex-col items-center text-center">
+                  <MessageSquare className="h-12 w-12 text-white/40" />
+                  <h3 className="mt-4 font-semibold text-white">{t.review.noMessagesFound}</h3>
+                  <p className="mt-2 text-sm text-white/50">
+                    {t.review.noMessagesDescription}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            {/* Gaps warning */}
-            {displayTimeline.gaps.length > 0 && (
-              <Card className="border-yellow-500/50 bg-yellow-500/5">
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
-                    <div>
-                      <p className="font-medium text-yellow-700 dark:text-yellow-400">
-                        Possible gaps detected
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Some messages might be missing. The battle will still
-                        work but may not be complete.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+        {/* Bottom Navigation - Fixed with gradient fade */}
+        <div
+          className="fixed bottom-0 left-0 right-0 max-w-[375px] mx-auto px-6 pb-6 pt-4"
+          style={{
+            background: "linear-gradient(to top, #0a0a0f 0%, rgba(10,10,15,0.95) 50%, transparent 100%)"
+          }}
+        >
+          {/* Edit log button */}
+          <div className="flex items-center justify-between mb-4 px-1">
+            <button className="flex items-center gap-1 text-white/50 hover:text-white/70 transition-colors">
+              <Edit3 className="w-4 h-4" />
+              <span className="text-xs">Editar Log</span>
+            </button>
+            {/* Participant avatars */}
+            <div className="flex items-center -space-x-2">
+              <div className="w-6 h-6 rounded-full bg-cyan/20 border border-cinder" />
+              <div className="w-6 h-6 rounded-full bg-orange/20 border border-cinder" />
+              <div className="w-6 h-6 rounded-full bg-white/10 border border-cinder flex items-center justify-center">
+                <span className="text-[8px] font-bold text-white">+2</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Start Battle Button - matches Figma exactly */}
+          <button
+            disabled={isAnalyzing || !displayTimeline}
+            onClick={nextStep}
+            className={cn(
+              "w-full h-14 rounded-xl relative overflow-hidden flex items-center justify-center gap-3 transition-all",
+              !isAnalyzing && displayTimeline
+                ? "bg-black border border-white/20 shadow-[0_20px_25px_-5px_rgba(0,0,0,0.5)]"
+                : "bg-white/10 text-white/40 cursor-not-allowed"
+            )}
+          >
+            {/* Gradient glow effects */}
+            {!isAnalyzing && displayTimeline && (
+              <>
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-1/2 opacity-60 blur-[5px]"
+                  style={{
+                    background: "linear-gradient(to right, rgba(34,211,238,0.4) 0%, transparent 100%)"
+                  }}
+                />
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-1/2 opacity-60 blur-[5px]"
+                  style={{
+                    background: "linear-gradient(to left, rgba(249,115,22,0.4) 0%, transparent 100%)"
+                  }}
+                />
+              </>
             )}
 
-            {/* Ad slot */}
-            <AdSlot placement="review_inline" />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Navigation */}
-      <div className="flex gap-3 pt-4">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={prevStep}
-          disabled={isAnalyzing}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
-        </Button>
-        <Button
-          className="flex-1"
-          disabled={isAnalyzing}
-          onClick={nextStep}
-        >
-          <Swords className="mr-2 h-4 w-4" />
-          Start Battle!
-        </Button>
+            <Swords className="w-6 h-6 text-white relative z-10" />
+            <span
+              className="text-lg font-bold tracking-[0.9px] uppercase relative z-10"
+              style={{
+                background: !isAnalyzing && displayTimeline
+                  ? "linear-gradient(to right, white 0%, white 50%, rgba(255,255,255,0.7) 100%)"
+                  : "none",
+                WebkitBackgroundClip: !isAnalyzing && displayTimeline ? "text" : undefined,
+                WebkitTextFillColor: !isAnalyzing && displayTimeline ? "transparent" : undefined,
+                color: isAnalyzing || !displayTimeline ? "rgba(255,255,255,0.4)" : undefined,
+              }}
+            >
+              ¡Iniciar Batalla!
+            </span>
+            <Swords className="w-6 h-6 text-white relative z-10 -scale-x-100" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -293,38 +411,69 @@ function MessageBubble({
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: isA ? -20 : 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
-      className={cn("flex items-start gap-2", !isA && "flex-row-reverse")}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.03 }}
+      className={cn("flex flex-col gap-1", isA ? "items-start" : "items-end")}
     >
-      <Avatar
-        className={cn("h-8 w-8", isA ? "bg-fighter-a" : "bg-fighter-b")}
-      >
-        <AvatarFallback className="bg-transparent text-white text-xs font-bold">
-          {getInitials(participantName)}
-        </AvatarFallback>
-      </Avatar>
-
-      <div
-        className={cn(
-          "max-w-[75%] rounded-2xl px-3 py-2",
-          isA
-            ? "rounded-bl-sm bg-fighter-a/10"
-            : "rounded-br-sm bg-fighter-b/10"
-        )}
-      >
-        <p className="text-sm">{message.text}</p>
-        {message.timestamp && (
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            {formatTimestamp(message.timestamp)}
-          </p>
-        )}
+      {/* Speaker Label - matches Figma exactly */}
+      <div className={cn(
+        "flex items-center gap-2 mb-1",
+        !isA && "flex-row-reverse"
+      )}>
+        {/* Avatar with border glow */}
+        <div
+          className={cn(
+            "w-6 h-6 rounded-full flex items-center justify-center border bg-cover bg-center",
+            isA
+              ? "border-cyan shadow-[0_0_10px_rgba(34,211,238,0.4)]"
+              : "border-orange shadow-[0_0_10px_rgba(249,115,22,0.4)]"
+          )}
+        >
+          <span className={cn(
+            "text-[10px] font-bold",
+            isA ? "text-cyan" : "text-orange"
+          )}>
+            {participantName.charAt(0).toUpperCase()}
+          </span>
+        </div>
+        <span className={cn(
+          "text-[10px] font-bold tracking-[0.25px] uppercase",
+          isA ? "text-cyan" : "text-orange"
+        )}>
+          {participantName}
+        </span>
       </div>
 
-      {message.confidence < 0.8 && (
-        <div className="flex items-center" title="Low confidence">
-          <AlertTriangle className="h-3 w-3 text-yellow-500" />
+      {/* Message Bubble - matches Figma exactly with gradient background */}
+      <div
+        className={cn(
+          "max-w-[290px] px-4 py-4 backdrop-blur-sm shadow-[0_0_15px] rounded-2xl",
+          isA
+            ? "rounded-tl-sm border border-cyan/30 shadow-cyan/10"
+            : "rounded-tr-sm border border-orange/30 shadow-orange/10"
+        )}
+        style={{
+          background: isA
+            ? "linear-gradient(134deg, rgba(34,211,238,0.15) 0%, rgba(14,116,144,0.25) 100%)"
+            : "linear-gradient(134deg, rgba(249,115,22,0.15) 0%, rgba(194,65,12,0.25) 100%)",
+          boxShadow: isA
+            ? "0 0 15px rgba(34,211,238,0.1), inset 0 0 10px rgba(34,211,238,0.05)"
+            : "0 0 15px rgba(249,115,22,0.1), inset 0 0 10px rgba(249,115,22,0.05)"
+        }}
+      >
+        <p className="text-sm text-white/90 leading-[19.25px]">{message.text}</p>
+      </div>
+
+      {/* Timestamp */}
+      {message.timestamp && (
+        <div className={cn(
+          "flex items-center gap-2 mt-1",
+          !isA && "flex-row-reverse"
+        )}>
+          <span className="text-[9px] text-white/30">
+            {message.timestamp}
+          </span>
         </div>
       )}
     </motion.div>

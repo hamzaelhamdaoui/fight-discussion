@@ -1,30 +1,28 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
-  Trophy,
   Download,
   Share2,
   Copy,
   Check,
-  RotateCcw,
   ChevronDown,
-  ChevronUp,
   Lightbulb,
+  Swords,
   Target,
-  BarChart3,
+  Loader2,
+  Save,
+  ChevronLeft,
+  Sparkles,
 } from "lucide-react";
 import { toPng } from "html-to-image";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
 import { useWizardStore } from "@/stores/wizard-store";
 import { useBattleStore } from "@/stores/battle-store";
-import { AdSlot } from "@/components/ads/ad-slot";
-import { cn, getInitials } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth-store";
+import { useTranslations } from "@/hooks/use-translations";
+import { persistenceService } from "@/services/supabase/persistence";
+import { cn } from "@/lib/utils";
 import type { AnalysisResult, Speaker } from "@/types";
 import { toast } from "@/hooks/use-toast";
 
@@ -32,79 +30,162 @@ import { toast } from "@/hooks/use-toast";
 const mockAnalysis: AnalysisResult = {
   winner: "B",
   winnerReason:
-    "Person B maintained composure and provided concrete evidence to support their position, ultimately resolving the conflict constructively.",
+    "Persona B mantuvo la compostura y aportó evidencia concreta para apoyar su posición, resolviendo el conflicto de manera constructiva.",
   criteria: [
     {
-      name: "Clarity of Communication",
+      name: "Claridad de argumentos",
       scoreA: 6,
       scoreB: 8,
       explanation:
-        "B communicated intentions clearly once given the chance, while A jumped to conclusions.",
+        "B comunicó sus intenciones claramente una vez tuvo oportunidad, mientras A saltó a conclusiones.",
     },
     {
-      name: "Emotional Control",
+      name: "Control emocional",
       scoreA: 5,
       scoreB: 7,
       explanation:
-        "B remained calm under accusation, A showed signs of panic and frustration.",
+        "B se mantuvo calmado bajo acusación, A mostró signos de pánico y frustración.",
     },
     {
-      name: "Use of Evidence",
+      name: "Uso de evidencia",
       scoreA: 3,
       scoreB: 9,
       explanation:
-        "B provided concrete proof (reservation confirmation), A relied on assumptions.",
+        "B proporcionó pruebas concretas (confirmación de reserva), A se basó en suposiciones.",
     },
     {
-      name: "Resolution Focus",
+      name: "Enfoque en resolución",
       scoreA: 6,
       scoreB: 8,
       explanation:
-        "Both worked towards resolution, but B actively offered a positive outcome.",
+        "Ambos trabajaron hacia la resolución, pero B ofreció activamente un resultado positivo.",
     },
     {
-      name: "Respectful Tone",
+      name: "Tono respetuoso",
       scoreA: 5,
       scoreB: 7,
       explanation:
-        "A used accusatory language initially, B remained respectful throughout.",
+        "A usó lenguaje acusatorio inicialmente, B mantuvo el respeto durante toda la conversación.",
     },
   ],
   recommendations: [
-    "Person A: Try asking questions before making accusations. A simple 'Did you remember our anniversary?' would have avoided the conflict.",
-    "Person B: Consider giving a small hint next time to prevent worry, even if planning a surprise.",
-    "Both: Establish a communication pattern for special occasions to avoid misunderstandings.",
+    "Has mantenido una postura lógica y válida. En el próximo round, intenta no responder de inmediato para aumentar tu control emocional.",
   ],
   keyMoments: [
     {
       messageId: "4",
-      description: "B provides evidence with reservation confirmation",
+      description: "B proporciona evidencia con confirmación de reserva",
       impact: "positive",
     },
     {
       messageId: "1",
-      description: "A opens with accusation without verification",
+      description: "A abre con acusación sin verificación",
       impact: "negative",
     },
     {
       messageId: "8",
-      description: "Both reach agreement and positive outcome",
+      description: "Ambos llegan a un acuerdo y resultado positivo",
       impact: "positive",
     },
   ],
 };
 
 export function ResultsStep() {
-  const { participants, battleResult, analysisResult, reset } = useWizardStore();
+  const { participants, battleResult, analysisResult, timeline, reset } = useWizardStore();
   const { hpA, hpB } = useBattleStore();
+  const { user, isGuest } = useAuthStore();
+  const t = useTranslations();
   const shareCardRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [showDetails, setShowDetails] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedBattleId, setSavedBattleId] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [_isCreatingLink, setIsCreatingLink] = useState(false);
 
   const analysis = analysisResult || mockAnalysis;
   const winner = analysis.winner;
-  const winnerName = winner ? participants[winner].name : "Draw";
+  const winnerName = winner ? participants[winner].name : t.results.draw;
+
+  // Auto-save battle for logged in users
+  useEffect(() => {
+    if (user && !isGuest && battleResult && analysisResult && timeline && !savedBattleId) {
+      handleSaveBattle();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isGuest, battleResult, analysisResult, timeline]);
+
+  const handleSaveBattle = async () => {
+    if (!battleResult || !analysisResult || !timeline) return;
+    if (isSaving || savedBattleId) return;
+
+    setIsSaving(true);
+    try {
+      const { battleId } = await persistenceService.saveBattle({
+        userId: user?.id,
+        participantAName: participants.A.name,
+        participantBName: participants.B.name,
+        timeline,
+        battleResult,
+        analysisResult,
+      });
+      setSavedBattleId(battleId);
+      toast({
+        title: t.results.battleSaved,
+        description: t.results.savedToHistory,
+      });
+    } catch (err) {
+      console.error("Save battle error:", err);
+      if (user && !isGuest) {
+        toast({
+          title: t.results.saveFailed,
+          description: t.results.couldNotSave,
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const _handleCreateShareLink = async () => {
+    if (!savedBattleId && user) {
+      await handleSaveBattle();
+    }
+
+    if (!savedBattleId) {
+      toast({
+        title: t.results.loginRequired,
+        description: t.results.signInForLinks,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingLink(true);
+    try {
+      const { shareUrl } = await persistenceService.createShareLink(
+        savedBattleId,
+        user?.id
+      );
+      setShareLink(shareUrl);
+      navigator.clipboard.writeText(shareUrl);
+      toast({
+        title: t.results.shareLinkCreated,
+        description: t.results.linkCopiedToClipboard,
+      });
+    } catch (err) {
+      console.error("Create share link error:", err);
+      toast({
+        title: t.results.failedToCreateLink,
+        description: (err as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingLink(false);
+    }
+  };
 
   const handleDownload = async () => {
     if (!shareCardRef.current) return;
@@ -114,7 +195,7 @@ export function ResultsStep() {
       const dataUrl = await toPng(shareCardRef.current, {
         quality: 0.95,
         pixelRatio: 2,
-        backgroundColor: "#0f172a",
+        backgroundColor: "#0a0a0f",
       });
 
       const link = document.createElement("a");
@@ -123,14 +204,14 @@ export function ResultsStep() {
       link.click();
 
       toast({
-        title: "Downloaded!",
-        description: "Share card saved to your device.",
+        title: t.results.downloaded,
+        description: t.results.shareCardSaved,
       });
     } catch (err) {
       console.error("Download error:", err);
       toast({
-        title: "Download failed",
-        description: "Could not generate image. Please try again.",
+        title: t.results.downloadFailed,
+        description: t.results.couldNotGenerate,
         variant: "destructive",
       });
     } finally {
@@ -139,14 +220,14 @@ export function ResultsStep() {
   };
 
   const handleShare = async () => {
-    const shareText = `${winnerName} won our argument battle on FightReplay AI! ${
+    const shareText = `${winnerName} ${t.results.winner.toLowerCase()} - FightReplay! ${
       winner === "A" ? hpA : hpB
-    } HP remaining.`;
+    } HP.`;
 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: "FightReplay AI Results",
+          title: "FightReplay",
           text: shareText,
           url: window.location.href,
         });
@@ -165,217 +246,389 @@ export function ResultsStep() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     toast({
-      title: "Link copied!",
-      description: "Share link copied to clipboard.",
+      title: t.results.linkCopied,
+      description: t.results.linkCopiedToClipboard,
     });
   };
 
   return (
-    <div className="space-y-6">
-      {/* Share Card (for download) */}
-      <div
-        ref={shareCardRef}
-        className="rounded-xl overflow-hidden bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4"
-      >
-        {/* Winner Banner */}
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="text-center mb-4"
-        >
-          <div className="inline-flex items-center gap-2 rounded-full bg-yellow-500/20 px-4 py-2 mb-3">
-            <Trophy className="h-5 w-5 text-yellow-400" />
-            <span className="text-yellow-400 font-bold">WINNER</span>
-          </div>
-          <h2 className="text-2xl font-bold text-white">{winnerName}</h2>
-          <p className="text-sm text-white/60 mt-1">{analysis.winnerReason}</p>
-        </motion.div>
+    <div className="min-h-screen bg-cinder">
+      {/* Main Container - Figma exact design */}
+      <div className="relative max-w-[375px] mx-auto bg-gradient-to-b from-cinder to-cinder-light border-x border-white/5 shadow-2xl overflow-hidden">
 
-        {/* Fighter Comparison */}
-        <div className="flex items-center justify-between gap-4 py-4">
-          <FighterResult
-            speaker="A"
-            name={participants.A.name}
-            hp={hpA}
-            isWinner={winner === "A"}
-          />
-          <div className="text-white/30 font-bold">VS</div>
-          <FighterResult
-            speaker="B"
-            name={participants.B.name}
-            hp={hpB}
-            isWinner={winner === "B"}
-          />
+        {/* Header - matches Figma exactly */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-white/5">
+          <button className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center">
+            <ChevronLeft className="w-6 h-6 text-white/60" />
+          </button>
+          <span className="text-[10px] font-bold text-white/40 tracking-[2px] uppercase">
+            Resultado Final
+          </span>
+          <div className="w-10 h-10" /> {/* Spacer for alignment */}
         </div>
 
-        {/* Stats */}
-        {battleResult && (
-          <div className="grid grid-cols-2 gap-2 mt-4 text-center">
-            <div className="rounded-lg bg-white/5 p-2">
-              <p className="text-xs text-white/50">Attacks</p>
-              <p className="font-bold text-white">
-                {battleResult.stats.totalAttacksA} vs{" "}
-                {battleResult.stats.totalAttacksB}
-              </p>
-            </div>
-            <div className="rounded-lg bg-white/5 p-2">
-              <p className="text-xs text-white/50">Total Damage</p>
-              <p className="font-bold text-white">
-                {battleResult.stats.totalDamageDealtA} vs{" "}
-                {battleResult.stats.totalDamageDealtB}
-              </p>
-            </div>
-          </div>
-        )}
+        {/* Victory Section - Share Card (for download) */}
+        <div
+          ref={shareCardRef}
+          className="relative px-6 py-8"
+        >
+          {/* Gradient overlays for glow effect */}
+          <div className="absolute top-0 left-0 w-full h-[520px] opacity-40" style={{
+            background: "radial-gradient(circle at 50% 30%, rgba(34,211,238,0.2) 0%, transparent 70%)"
+          }} />
+          <div className="absolute bottom-0 right-0 w-full h-[260px] opacity-30" style={{
+            background: "radial-gradient(circle at 50% 70%, rgba(249,115,22,0.1) 0%, transparent 70%)"
+          }} />
 
-        {/* Branding */}
-        <div className="mt-4 pt-3 border-t border-white/10 text-center">
-          <p className="text-xs text-white/40">
-            Created with FightReplay AI
+          {/* Decorative sparkles - matches Figma */}
+          <div className="absolute top-[156px] left-[56px] w-1 h-1 rounded-full bg-cyan opacity-80 shadow-[0_0_6px_#22d3ee]" />
+          <div className="absolute top-[273px] right-[58px] w-0.5 h-0.5 rounded-full bg-white opacity-80 shadow-[0_0_4px_#a5f3fc]" />
+          <div className="absolute top-[117px] right-[112px] w-[3px] h-[3px] rounded-full bg-cyan opacity-80 shadow-[0_0_5px_#0e7490]" />
+
+          {/* Winner Banner - matches Figma exactly */}
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="relative text-center pt-4"
+          >
+            {/* Victory Text with glow - Figma exact */}
+            <div className="relative mb-8">
+              <div className="absolute inset-0 blur-[20px] bg-gold/20 rounded-full" />
+              <h1
+                className="relative text-[59px] font-bold tracking-[-3px] leading-[60px] -rotate-2"
+                style={{
+                  background: "linear-gradient(to bottom, #fef9c3 0%, #facc15 50%, #c2410c 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                }}
+              >
+                ¡VICTORIA!
+              </h1>
+            </div>
+
+            {/* Winner Avatar - matches Figma exactly */}
+            <div className="relative mx-auto mb-4">
+              {/* Glow effect */}
+              <div className="absolute inset-0 blur-[12px] bg-cyan/20 rounded-full" />
+
+              {/* Avatar with border */}
+              <div className={cn(
+                "relative w-40 h-40 mx-auto rounded-full border-4 flex items-center justify-center",
+                winner === "A"
+                  ? "border-gold shadow-[0_0_30px_rgba(250,204,21,0.4)]"
+                  : "border-gold shadow-[0_0_30px_rgba(250,204,21,0.4)]"
+              )}>
+                <div className="w-full h-full rounded-full bg-gradient-to-br from-cinder-light to-cinder flex items-center justify-center">
+                  <span className="text-5xl font-bold text-gold-bright">
+                    {(winner ? participants[winner].name : "").charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Winner Name - below avatar */}
+              <h2 className="mt-4 text-[30px] font-bold text-white tracking-[0.75px] uppercase">
+                {winnerName}
+              </h2>
+
+              {/* XP Badge - matches Figma */}
+              <div className="flex items-center justify-center gap-1.5 mt-2">
+                <Sparkles className="w-3.5 h-3.5 text-gold/80" />
+                <span className="text-xs font-bold text-gold/80 tracking-[1.2px]">+450 XP</span>
+              </div>
+
+              {/* Ganadora Badge - matches Figma exactly */}
+              <div className="inline-flex mt-3 px-7 py-2.5 rounded-full border border-gold-bright shadow-lg"
+                style={{
+                  background: "linear-gradient(to right, #a16207 0%, #eab308 50%, #a16207 100%)"
+                }}
+              >
+                <span className="text-[13px] font-bold text-black tracking-[1.32px] uppercase">
+                  Ganadora
+                </span>
+              </div>
+            </div>
+
+            {/* Loser Section - smaller, greyed out */}
+            <div className="mt-8 opacity-70">
+              <div className="relative mx-auto w-14 h-14 rounded-full border border-orange/50 overflow-hidden shadow-[0_0_15px_rgba(249,115,22,0.2)]">
+                <div className="absolute inset-0 bg-black/40" />
+                <div className="w-full h-full rounded-full bg-gradient-to-br from-cinder-light to-cinder flex items-center justify-center">
+                  <span className="text-lg font-bold text-white/40">
+                    {(winner === "A" ? participants.B.name : participants.A.name).charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              </div>
+              <p className="mt-2 text-xs font-bold text-white/40 uppercase tracking-wide line-through">
+                {winner === "A" ? participants.B.name : participants.A.name}
+              </p>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Bottom Section with gradient fade - matches Figma */}
+        <div
+          className="px-6 pb-10 pt-6 space-y-4"
+          style={{
+            background: "linear-gradient(to top, #000 0%, rgba(0,0,0,0.8) 50%, transparent 100%)"
+          }}
+        >
+
+          {/* Primary CTA Button - Ver análisis completo - matches Figma */}
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className="w-full py-4 rounded-xl relative overflow-hidden opacity-90"
+            style={{
+              background: "#0f1525",
+              border: "1px solid rgba(251,191,36,0.6)",
+              boxShadow: "0 0 25px rgba(59,130,246,0.4), inset 0 0 10px rgba(251,191,36,0.2)"
+            }}
+          >
+            <div className="flex items-center justify-center gap-3">
+              <Swords className="w-6 h-6 text-gold/90" />
+              <span className="text-sm font-bold text-[#fefce8] tracking-[1.4px] uppercase">
+                Ver análisis completo
+              </span>
+              <ChevronDown className={cn(
+                "w-5 h-5 text-gold/90 transition-transform",
+                showDetails && "rotate-180"
+              )} />
+            </div>
+          </button>
+
+          {/* Battle ID - matches Figma */}
+          <p className="text-center text-[10px] text-white/20 font-inter">
+            ID DE BATALLA: #{savedBattleId?.slice(0, 4).toUpperCase() || "XXXX"}-{savedBattleId?.slice(-4).toUpperCase() || "XXXX"}
           </p>
         </div>
-      </div>
 
-      {/* Ad - Winner */}
-      <AdSlot placement="results_winner" />
-
-      {/* Action Buttons */}
-      <div className="flex gap-3">
-        <Button
-          variant="outline"
-          className="flex-1"
-          onClick={handleDownload}
-          disabled={isDownloading}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          {isDownloading ? "Saving..." : "Save Image"}
-        </Button>
-        <Button className="flex-1" onClick={handleShare}>
-          {copied ? (
-            <>
-              <Check className="mr-2 h-4 w-4" />
-              Copied!
-            </>
-          ) : (
-            <>
-              <Share2 className="mr-2 h-4 w-4" />
-              Share
-            </>
-          )}
-        </Button>
-      </div>
-
-      {/* Detailed Analysis Toggle */}
-      <Button
-        variant="ghost"
-        className="w-full justify-between"
-        onClick={() => setShowDetails(!showDetails)}
-      >
-        <span className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4" />
-          Detailed Analysis
-        </span>
-        {showDetails ? (
-          <ChevronUp className="h-4 w-4" />
-        ) : (
-          <ChevronDown className="h-4 w-4" />
-        )}
-      </Button>
-
-      {showDetails && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="space-y-4"
-        >
-          {/* Criteria Breakdown */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Target className="h-4 w-4" />
-                Score Breakdown
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {analysis.criteria.map((criterion) => (
-                <div key={criterion.name} className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{criterion.name}</span>
-                    <span className="text-muted-foreground">
-                      {criterion.scoreA} vs {criterion.scoreB}
-                    </span>
+        {/* Expanded Analysis Section */}
+        {showDetails && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            className="px-4 pb-6 space-y-4"
+          >
+            {/* Fighter Stats Cards - Side by side like Figma */}
+            <div className="flex gap-3">
+              {/* Fighter A Stats */}
+              <div className="flex-1 rounded-2xl p-4 backdrop-blur-lg border-t-2 border-cyan shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
+                style={{ background: "rgba(20,20,30,0.6)" }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-cyan/20 border border-cyan flex items-center justify-center">
+                    <Swords className="w-3 h-3 text-cyan" />
                   </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <Progress
-                        value={criterion.scoreA * 10}
-                        className="h-2"
-                        indicatorClassName="bg-fighter-a"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <Progress
-                        value={criterion.scoreB * 10}
-                        className="h-2"
-                        indicatorClassName="bg-fighter-b"
-                      />
-                    </div>
+                  <span className="text-xs font-bold text-cyan tracking-[0.6px] uppercase">Hielo</span>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Ataques</p>
+                    <p className="text-xl font-bold text-white">{battleResult?.stats.totalAttacksA || 0}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {criterion.explanation}
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Daño Total</p>
+                    <p className="text-xl font-bold text-cyan">{battleResult?.stats.totalDamageDealtA || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Precisión</p>
+                    <p className="text-xl font-bold text-white">92%</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Fighter B Stats */}
+              <div className="flex-1 rounded-2xl p-4 backdrop-blur-lg border-t-2 border-orange shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
+                style={{ background: "rgba(20,20,30,0.6)" }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-orange/20 border border-orange flex items-center justify-center">
+                    <Target className="w-3 h-3 text-orange" />
+                  </div>
+                  <span className="text-xs font-bold text-orange tracking-[0.6px] uppercase">Fuego</span>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Ataques</p>
+                    <p className="text-xl font-bold text-white">{battleResult?.stats.totalAttacksB || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Daño Total</p>
+                    <p className="text-xl font-bold text-orange">{battleResult?.stats.totalDamageDealtB || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">Precisión</p>
+                    <p className="text-xl font-bold text-white">65%</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Analysis Card - matches Figma exactly */}
+            <div className="rounded-2xl p-5 backdrop-blur-lg border border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
+              style={{ background: "rgba(20,20,30,0.6)" }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Swords className="w-4 h-4 text-white" />
+                  <span className="text-sm font-bold text-white tracking-[0.7px] uppercase">Análisis de Batalla</span>
+                </div>
+                <span className="px-2 py-0.5 rounded bg-white/10 text-[10px] text-white/60">Detallado</span>
+              </div>
+
+              {/* Criteria Bars */}
+              <div className="space-y-5">
+                {analysis.criteria.slice(0, 2).map((criterion) => {
+                  const totalScore = criterion.scoreA + criterion.scoreB;
+                  const percentA = totalScore > 0 ? Math.round((criterion.scoreA / totalScore) * 100) : 50;
+                  const percentB = 100 - percentA;
+
+                  return (
+                    <div key={criterion.name} className="space-y-2">
+                      <p className="text-xs text-white/70">{criterion.name}</p>
+                      <div className="h-2 rounded-full bg-black/40 flex overflow-hidden">
+                        <div
+                          className="h-full bg-cyan shadow-[0_0_10px_rgba(34,211,238,0.6)]"
+                          style={{ width: `${percentA}%` }}
+                        />
+                        <div className="w-px bg-white" />
+                        <div
+                          className="h-full bg-orange shadow-[0_0_10px_rgba(249,115,22,0.6)]"
+                          style={{ width: `${percentB}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-[10px] font-bold text-cyan">
+                          {percentA}% ({participants.A.name})
+                        </span>
+                        <span className="text-[10px] font-bold text-orange">
+                          {percentB}% ({participants.B.name})
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Summary Text */}
+              <div className="mt-5 pt-5 border-t border-white/5">
+                <p className="text-xs text-white/60 leading-[19.5px]">
+                  {analysis.winnerReason}
+                </p>
+              </div>
+            </div>
+
+            {/* Recommendations Card */}
+            <div className="rounded-xl bg-cinder-light border border-gold/30 p-4">
+              <div className="flex items-start gap-3">
+                <Lightbulb className="w-5 h-5 text-gold flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-gold tracking-wider uppercase mb-2">
+                    RECOMENDACIONES
+                  </p>
+                  <p className="text-sm text-white/70 leading-relaxed">
+                    {analysis.recommendations[0]}
                   </p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
-          {/* Ad - Mid */}
-          <AdSlot placement="results_mid" />
+        {/* Bottom Action Buttons - Fixed at bottom with gradient */}
+        <div
+          className="sticky bottom-0 px-5 py-5 space-y-4"
+          style={{
+            background: "linear-gradient(to top, #0a0a0f 0%, rgba(10,10,15,0.95) 50%, transparent 100%)"
+          }}
+        >
+          {/* Save for guests prompt */}
+          {isGuest && (
+            <div className="rounded-xl bg-cinder-light border border-white/10 p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Save className="w-5 h-5 text-white/60" />
+                  <div>
+                    <p className="text-sm font-medium text-white">¿Quieres guardar tus batallas?</p>
+                    <p className="text-xs text-white/40">Crea una cuenta en tu historial</p>
+                  </div>
+                </div>
+                <span className="px-2 py-1 rounded bg-green-500/20 text-[10px] font-bold text-green-500 tracking-wider">
+                  GRATIS
+                </span>
+              </div>
+            </div>
+          )}
 
-          {/* Recommendations */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Lightbulb className="h-4 w-4" />
-                Recommendations
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-3">
-                {analysis.recommendations.map((rec, index) => (
-                  <li key={index} className="flex items-start gap-2 text-sm">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs text-primary">
-                      {index + 1}
-                    </span>
-                    <span className="text-muted-foreground">{rec}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
+          {/* Action Buttons - matches Figma exactly */}
+          <div className="flex gap-3">
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="flex-1 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 hover:bg-white/10 transition-colors"
+            >
+              {isDownloading ? (
+                <Loader2 className="w-6 h-6 animate-spin text-white/90" />
+              ) : (
+                <Download className="w-6 h-6 text-white/90" />
+              )}
+              <span className="text-sm font-bold text-white/90">Guardar</span>
+            </button>
+            <button
+              onClick={handleShare}
+              className="flex-1 h-12 rounded-xl bg-blue shadow-[0_10px_15px_-3px_rgba(59,131,247,0.2)] flex items-center justify-center gap-2 hover:brightness-110 transition-all"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-6 h-6 text-white" />
+                  <span className="text-sm font-bold text-white">Copiado</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-6 h-6 text-white" />
+                  <span className="text-sm font-bold text-white">Compartir</span>
+                </>
+              )}
+            </button>
+          </div>
 
-      {/* Ad - Bottom */}
-      <AdSlot placement="results_bottom" />
+          {/* Analyze Another Button */}
+          <button
+            onClick={reset}
+            className="w-full py-4 rounded-xl border-2 border-gold text-gold font-semibold tracking-wide uppercase text-sm hover:bg-gold/10 transition-colors"
+          >
+            Analizar otra conversación
+          </button>
 
-      {/* Start Over */}
-      <Separator className="my-6" />
-      <Button variant="outline" className="w-full" onClick={reset}>
-        <RotateCcw className="mr-2 h-4 w-4" />
-        Analyze Another Conversation
-      </Button>
-
-      {/* Disclaimer */}
-      <p className="text-center text-xs text-muted-foreground">
-        This analysis is for entertainment purposes only and should not be
-        considered professional relationship advice.
-      </p>
+          {/* Create Share Link */}
+          {shareLink && (
+            <div className="rounded-xl bg-cinder-light border border-white/10 p-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={shareLink}
+                  readOnly
+                  className="flex-1 bg-transparent text-sm text-white/60 truncate outline-none"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareLink);
+                    toast({ title: t.results.copied, description: t.results.linkCopiedToClipboard });
+                  }}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <Copy className="w-4 h-4 text-white/60" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-function FighterResult({
+function _FighterResult({
   speaker,
   name,
   hp,
@@ -386,37 +639,45 @@ function FighterResult({
   hp: number;
   isWinner: boolean;
 }) {
+  const isCyan = speaker === "A";
+
   return (
-    <div className={cn("flex-1 text-center", isWinner && "relative")}>
-      {isWinner && (
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          className="absolute -top-2 left-1/2 -translate-x-1/2"
+    <div className="flex flex-col items-center">
+      {/* Avatar with badge */}
+      <div className="relative">
+        <div
+          className={cn(
+            "w-12 h-12 rounded-full border-2 flex items-center justify-center",
+            isCyan
+              ? "border-cyan bg-cyan/10 shadow-[0_0_10px_rgba(34,211,238,0.4)]"
+              : "border-orange bg-orange/10 shadow-[0_0_10px_rgba(249,115,22,0.4)]",
+            isWinner && "border-gold shadow-[0_0_15px_rgba(250,204,21,0.5)]"
+          )}
         >
-          <Trophy className="h-4 w-4 text-yellow-400" />
-        </motion.div>
-      )}
-      <Avatar
-        className={cn(
-          "h-14 w-14 mx-auto border-2",
-          speaker === "A"
-            ? "bg-fighter-a border-fighter-a"
-            : "bg-fighter-b border-fighter-b",
-          isWinner && "ring-2 ring-yellow-400 ring-offset-2 ring-offset-slate-900"
-        )}
-      >
-        <AvatarFallback className="bg-transparent text-white font-bold">
-          {getInitials(name)}
-        </AvatarFallback>
-      </Avatar>
-      <p className="mt-2 text-sm font-medium text-white truncate">{name}</p>
-      <p
-        className={cn(
-          "text-lg font-bold",
-          hp > 50 ? "text-green-400" : hp > 25 ? "text-yellow-400" : "text-red-400"
-        )}
-      >
+          <span className={cn(
+            "text-lg font-bold",
+            isCyan ? "text-cyan" : "text-orange",
+            isWinner && "text-gold"
+          )}>
+            {name.charAt(0).toUpperCase()}
+          </span>
+        </div>
+        {/* Speaker badge */}
+        <div className={cn(
+          "absolute -bottom-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider",
+          isCyan
+            ? "bg-cyan text-black"
+            : "bg-orange text-white"
+        )}>
+          {isCyan ? "A" : "B"}
+        </div>
+      </div>
+
+      {/* HP Display */}
+      <p className={cn(
+        "mt-3 text-lg font-bold",
+        hp > 50 ? "text-green-500" : hp > 25 ? "text-amber-500" : "text-red-500"
+      )}>
         {Math.round(hp)} HP
       </p>
     </div>

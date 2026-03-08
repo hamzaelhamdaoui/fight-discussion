@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/providers/providers";
 
@@ -13,29 +13,41 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "FightReplay AI - Turn Your Arguments Into Epic Battles",
+  title: "FightReplay - Convierte tus discusiones en batallas épicas",
   description:
-    "Upload screenshots of your conversations and watch AI transform them into animated battles. See who really won the argument!",
+    "Sube capturas de tus conversaciones y descubre quién ganó realmente la discusión. Análisis divertido de tus debates.",
   keywords: [
-    "argument analyzer",
-    "conversation battle",
-    "AI chat analysis",
-    "relationship tool",
-    "discussion analyzer",
+    "analizador de argumentos",
+    "batalla de conversaciones",
+    "análisis de chat",
+    "herramienta de relaciones",
+    "analizador de discusiones",
   ],
-  authors: [{ name: "FightReplay AI" }],
+  authors: [{ name: "FightReplay" }],
   openGraph: {
-    title: "FightReplay AI - Turn Your Arguments Into Epic Battles",
+    title: "FightReplay - Convierte tus discusiones en batallas épicas",
     description:
-      "Upload screenshots of your conversations and watch AI transform them into animated battles.",
+      "Sube capturas de tus conversaciones y descubre quién ganó la discusión.",
     type: "website",
-    locale: "en_US",
+    locale: "es_ES",
   },
   twitter: {
     card: "summary_large_image",
-    title: "FightReplay AI",
-    description: "Turn your arguments into epic animated battles!",
+    title: "FightReplay",
+    description: "Convierte tus discusiones en batallas épicas!",
   },
   robots: {
     index: true,
@@ -62,7 +74,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} ${inter.variable} font-space-grotesk antialiased min-h-screen`}
       >
         <Providers>{children}</Providers>
       </body>

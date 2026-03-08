@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     // Extract the base64 data (remove data URL prefix if present)
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");

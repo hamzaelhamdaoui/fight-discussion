@@ -1,10 +1,10 @@
 {
-    "state": "OPEN",
-    "last_change": "2026-01-23T23:30:40+00:00",
-    "consecutive_no_progress": 3,
+    "state": "CLOSED",
+    "last_change": "2026-01-24T16:32:51+00:00",
+    "consecutive_no_progress": 0,
     "consecutive_same_error": 0,
-    "last_progress_loop": 0,
-    "total_opens": 1,
-    "reason": "No recovery, opening circuit after 3 loops",
-    "current_loop": 3
+    "last_progress_loop": 1,
+    "total_opens": 0,
+    "reason": "",
+    "current_loop": 1
 }
